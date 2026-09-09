@@ -1,0 +1,151 @@
+<mujoco model="blinx_openc3_real_pusht">
+  <compiler angle="radian" coordinate="local" autolimits="true" meshdir="openc3_real/meshes"/>
+  
+  <option timestep="0.002" integrator="implicitfast" solver="Newton" iterations="50" tolerance="1e-8">
+    <flag contact="enable"/>
+  </option>
+
+  <asset>
+    <!-- 真实 CAD 模型网格定义 -->
+    <mesh name="Link0" file="Link0.STL"/>
+    <mesh name="Link1" file="Link1.STL"/>
+    <mesh name="Link2" file="Link2.STL"/>
+    <mesh name="Link3" file="Link3.STL"/>
+    <mesh name="Link4" file="Link4.STL"/>
+    <mesh name="Link5" file="Link5.STL"/>
+    <mesh name="Link6" file="Link6.STL"/>
+
+    <!-- 材质定义 -->
+    <material name="blinx_white" rgba="0.94 0.95 0.96 1.0" roughness="0.3" specular="0.4"/>
+    <material name="blinx_blue" rgba="0.0 0.38 0.82 1.0" roughness="0.2" specular="0.6"/>
+    <material name="dark_metal" rgba="0.15 0.15 0.16 1.0" roughness="0.5" specular="0.3"/>
+    <material name="metal_flange" rgba="0.75 0.75 0.78 1.0" roughness="0.1" specular="0.8"/>
+    <material name="table_mat" rgba="0.90 0.90 0.92 1.0" roughness="0.6"/>
+    <material name="t_block_mat" rgba="0.85 0.2 0.2 1.0" roughness="0.3" specular="0.3"/>
+    <material name="goal_mat" rgba="0.2 0.8 0.3 0.4"/>
+  </asset>
+
+  <default>
+    <joint damping="0.5" armature="0.01" frictionloss="0.1"/>
+    <!-- 增强位置伺服刚度，消除推运滞后引起的空推 -->
+    <position kp="350" kv="25" forcelimited="true" forcerange="-80 80"/>
+  </default>
+
+  <visual>
+    <headlight ambient="0.45 0.45 0.45" diffuse="0.75 0.75 0.75" specular="0.3 0.3 0.3"/>
+    <quality shadowsize="2048" offsamples="4"/>
+  </visual>
+
+  <worldbody>
+    <geom name="floor" type="plane" size="2 2 0.1" rgba="0.95 0.95 0.95 1"/>
+    <light directional="true" pos="0.2 0.2 2.5" dir="-0.2 -0.2 -1" diffuse="0.8 0.8 0.8" specular="0.3 0.3 0.3"/>
+
+    <!-- 顶部全局观测相机 -->
+    <camera name="top_cam" pos="0.38 0.0 0.85" euler="0 0.45 1.5708" fovy="48"/>
+
+    <!-- 1. 工作台 (独立节点) -->
+    <body name="table" pos="0.38 0 0.2">
+      <geom name="table_top" type="box" size="0.35 0.45 0.2" material="table_mat"/>
+      <body name="goal_marker" pos="0.0 0.0 0.201">
+        <geom name="goal_stem" type="box" size="0.015 0.045 0.001" pos="0.0 -0.015 0" material="goal_mat" contype="0" conaffinity="0"/>
+        <geom name="goal_bar" type="box" size="0.045 0.015 0.001" pos="0.0 0.045 0" material="goal_mat" contype="0" conaffinity="0"/>
+      </body>
+    </body>
+
+    <!-- 2. 真实可推运的 T-Block 物块 (独立节点，严格放置在桌面上) -->
+    <body name="tee_block" pos="0.35 -0.05 0.4155">
+      <freejoint name="tee_joint"/>
+      <geom name="t_stem" type="box" size="0.015 0.045 0.015" pos="0.0 -0.015 0" material="t_block_mat" mass="0.05"/>
+      <geom name="t_bar" type="box" size="0.045 0.015 0.015" pos="0.0 0.045 0" material="t_block_mat" mass="0.06"/>
+    </body>
+
+    <!-- 3. 机械臂主体 (独立节点) -->
+    <body name="openc3_base_plate" pos="0 0 0.4">
+      <geom name="base_plate_geom" type="box" size="0.12 0.12 0.008" material="dark_metal"/>
+
+      <!-- Link0 -->
+      <body name="Link0" pos="0 0 0.008">
+        <inertial pos="0.0085775 0.0001082 0.0602812" mass="0.4745" diaginertia="0.0013548 0.0011364 0.00092109"/>
+        <geom type="mesh" mesh="Link0" material="blinx_white"/>
+
+        <!-- Link1 -->
+        <body name="Link1" pos="0 0 0.2" quat="0.5 0.5 0.5 -0.5">
+          <joint name="joint1" type="hinge" axis="1 0 0" range="-3.054 3.054"/>
+          <inertial pos="-0.00608 0 0.00419" mass="0.8038" diaginertia="0.0008805 0.0008464 0.0008258"/>
+          <geom type="mesh" mesh="Link1" material="blinx_white"/>
+
+          <!-- Link2 -->
+          <body name="Link2" pos="-0.2995 0 0.01625" quat="0.707107 0 0 -0.707107">
+            <!-- 核心修复：添加 pos，将旋转锚点从手肘拉回肩部 (0, 0.2995, -0.01625) -->
+            <joint name="joint2" type="hinge" pos="0 0.2995 -0.01625" axis="0 0 -1" range="-2.094 2.094"/>
+            <inertial pos="0 0.16861 0.09883" mass="2.1259" diaginertia="0.0039186 0.0017835 0.0039804"/>
+            <geom type="mesh" mesh="Link2" material="blinx_white"/>
+
+            <!-- Link3 -->
+            <body name="Link3" pos="0 -0.301 0">
+              <!-- 核心修复：添加 pos，将旋转锚点从手腕拉回手肘 (0, 0.301, 0) -->
+              <joint name="joint3" type="hinge" pos="0 0.301 0" axis="0 0 -1" range="-2.618 2.618"/>
+              <inertial pos="0 0.14455 0.00184" mass="1.0226" diaginertia="0.0020493 0.0004861 0.0020479"/>
+              <geom type="mesh" mesh="Link3" material="blinx_white"/>
+
+              <!-- Link4 -->
+              <body name="Link4" pos="0 0 0.07775" quat="0.5 0.5 0.5 -0.5">
+                <joint name="joint4" type="hinge" axis="1 0 0" range="-3.054 3.054"/>
+                <inertial pos="0.00269 0 -0.00483" mass="0.2628" diaginertia="0.0001306 0.0001326 0.0001289"/>
+                <geom type="mesh" mesh="Link4" material="blinx_white"/>
+
+                <!-- Link5 -->
+                <body name="Link5" pos="0 0 0.0785" quat="0.707107 -0.707107 0 0">
+                  <joint name="joint5" type="hinge" axis="0 1 0" range="-3.054 3.054"/>
+                  <inertial pos="0.0049 0.00216 0" mass="0.2589" diaginertia="0.0001272 0.0001273 0.0001309"/>
+                  <geom type="mesh" mesh="Link5" material="blinx_white"/>
+
+                  <!-- Link6 (末端法兰) -->
+                  <body name="Link6" pos="-0.07825 0 0">
+                    <joint name="joint6" type="hinge" axis="1 0 0" range="-3.054 3.054"/>
+                    <inertial pos="0.02174 -0.00213 0.00014" mass="0.0352" diaginertia="2.088E-05 1.276E-05 1.280E-05"/>
+                    <geom type="mesh" mesh="Link6" material="metal_flange"/>
+
+                    <!-- 手眼相机同步调整至朝向推杆外侧 -->
+                    <camera name="wrist_cam" pos="-0.04 0 0.045" euler="0 0.45 1.5708" fovy="58"/>
+
+                    <!-- 将 Link6 末端推杆修改为平滑胶囊体，消除边缘奇异性 -->
+                    <body name="pusher_tool" pos="0 0 0">
+                      <geom name="pusher_base" type="cylinder" fromto="0 0 0 -0.01 0 0" size="0.016" material="dark_metal"/>
+                      <geom name="pusher_tip" type="capsule" fromto="-0.01 0 0 -0.07 0 0" size="0.008" material="metal_flange"/>
+                      <site name="pusher_site" pos="-0.078 0 0" size="0.006" rgba="1 0 0 1"/>
+                    </body>
+
+                    <!-- 虚拟 7D 动作占位关节 (必须保留，供动作空间对齐) -->
+                    <body name="dummy_gripper_link" pos="0 0 0">
+                      <joint name="dummy_tool_joint" type="slide" axis="1 0 0" range="0 0.01"/>
+                      <geom name="dummy_geom" type="sphere" size="0.001" mass="0.001" contype="0" conaffinity="0"/>
+                    </body>
+
+                  </body> <!-- end Link6 -->
+                </body> <!-- end Link5 -->
+              </body> <!-- end Link4 -->
+            </body> <!-- end Link3 -->
+          </body> <!-- end Link2 -->
+        </body> <!-- end Link1 -->
+      </body> <!-- end Link0 -->
+    </body> <!-- end openc3_base_plate -->
+  </worldbody>
+
+  <contact>
+    <pair geom1="pusher_tip" geom2="t_stem" friction="0.4 0.05 0.0001" solref="0.008 1.0" solimp="0.8 0.95 0.001"/>
+    <pair geom1="pusher_tip" geom2="t_bar" friction="0.4 0.05 0.0001" solref="0.008 1.0" solimp="0.8 0.95 0.001"/>
+    <pair geom1="table_top" geom2="t_stem" friction="0.35 0.1 0.0001" solref="0.015 1.0" solimp="0.9 0.95 0.001"/>
+    <pair geom1="table_top" geom2="t_bar" friction="0.35 0.1 0.0001" solref="0.015 1.0" solimp="0.9 0.95 0.001"/>
+  </contact>
+
+  <actuator>
+    <position name="act_j1" joint="joint1" ctrlrange="-3.054 3.054"/>
+    <position name="act_j2" joint="joint2" ctrlrange="-2.094 2.094"/>
+    <position name="act_j3" joint="joint3" ctrlrange="-2.618 2.618"/>
+    <position name="act_j4" joint="joint4" ctrlrange="-3.054 3.054"/>
+    <position name="act_j5" joint="joint5" ctrlrange="-3.054 3.054"/>
+    <position name="act_j6" joint="joint6" ctrlrange="-3.054 3.054"/>
+    <position name="act_tool" joint="dummy_tool_joint" ctrlrange="0 0.01" kp="10" kv="1"/>
+  </actuator>
+</mujoco>

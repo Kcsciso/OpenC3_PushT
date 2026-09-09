@@ -1,0 +1,21 @@
+# 数据集与录制视频
+data/
+**/data/
+*.parquet
+*.mp4
+*.h5
+*.zarr
+
+# 训练输出与权重模型（仅保留代码，不传大文件）
+outputs/
+*.pt
+*.pth
+*.safetensors
+*.ckpt
+
+# Python 缓存与系统文件
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.swp
+.DS_Store
