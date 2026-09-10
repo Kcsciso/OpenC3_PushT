@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
+from torch.optim.lr_scheduler import CosineAnnealingLR
 
 from lerobot.configs.types import FeatureType, PolicyFeature
 from lerobot.policies.diffusion.configuration_diffusion import DiffusionConfig
@@ -18,12 +19,11 @@ DATASET_DIR = BASE_DIR / "data" / "openc3_pusht_expert"
 OUTPUT_DIR = BASE_DIR / "outputs" / "openc3_pusht_diffusion"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# 提升时序感知至 4 帧历史 (0.133 秒)，打破开环动作混淆
 T_OBS = 4
 T_PRED = 16
 BATCH_SIZE = 16
 GRAD_ACCUM_STEPS = 2
-TRAIN_STEPS = 40000   # 扩充数据后，跑 40,000 步确保收敛
+TRAIN_STEPS = 40000
 LR = 1e-4
 
 
@@ -130,7 +130,6 @@ def train():
         "action": PolicyFeature(type=FeatureType.ACTION, shape=(7,)),
     }
 
-    # 启用预训练视觉骨干，杜绝从零随机初始化导致的视觉迟钝
     cfg = DiffusionConfig(
         n_obs_steps=T_OBS,
         horizon=T_PRED,
@@ -141,7 +140,7 @@ def train():
         pretrained_backbone_weights="ResNet18_Weights.IMAGENET1K_V1",
         down_dims=[256, 512, 1024],
         num_train_timesteps=100,
-        num_inference_steps=16,  # 提高到 16 步，确保测试时解算轨迹足够平滑
+        num_inference_steps=16,
     )
 
     policy = DiffusionPolicy(cfg)
@@ -149,11 +148,14 @@ def train():
     policy.train()
 
     optimizer = torch.optim.AdamW(policy.parameters(), lr=LR, weight_decay=1e-6)
+    lr_scheduler = CosineAnnealingLR(optimizer, T_max=TRAIN_STEPS, eta_min=1e-6)
+
     step = 0
+    optimizer.zero_grad()
     pbar = tqdm(total=TRAIN_STEPS, desc="Training Policy")
 
     while step < TRAIN_STEPS:
-        for batch in dataloader:
+        for batch_idx, batch in enumerate(dataloader):
             states = normalize_tensor(batch["observation.state"].to(DEVICE), stats["observation.state"])
             actions = normalize_tensor(batch["action"].to(DEVICE), stats["action"])
             top_imgs = batch["observation.images.top"].to(DEVICE)
@@ -170,19 +172,28 @@ def train():
             }
 
             loss, _ = policy(model_input)
-            loss_val = loss.item()
-
-            optimizer.zero_grad()
+            loss = loss / GRAD_ACCUM_STEPS
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(policy.parameters(), max_norm=1.0)
-            optimizer.step()
 
-            step += 1
-            pbar.update(1)
-            pbar.set_postfix({"loss": f"{loss_val:.4f}"})
+            if (batch_idx + 1) % GRAD_ACCUM_STEPS == 0:
+                torch.nn.utils.clip_grad_norm_(policy.parameters(), max_norm=1.0)
+                optimizer.step()
+                optimizer.zero_grad()
+                lr_scheduler.step()
 
-            if step >= TRAIN_STEPS:
-                break
+                step += 1
+                pbar.update(1)
+                cur_lr = optimizer.param_groups[0]["lr"]
+                pbar.set_postfix({"loss": f"{loss.item() * GRAD_ACCUM_STEPS:.4f}", "lr": f"{cur_lr:.2e}"})
+
+                if step % 5000 == 0:
+                    ckpt_path = OUTPUT_DIR / f"checkpoint_{step}"
+                    policy.save_pretrained(str(ckpt_path))
+                    torch.save(stats, ckpt_path / "stats.pt")
+                    torch.save(stats, ckpt_path / "dataset_stats.pt")
+
+                if step >= TRAIN_STEPS:
+                    break
 
     pbar.close()
 
